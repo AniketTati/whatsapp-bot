@@ -1,0 +1,14 @@
+{
+    "users": [
+      {
+        "phone": "1234567890",
+        "tone": "friendly",
+        "persona": "You are a helpful and friendly assistant who loves to chat about daily life and provide useful information."
+      },
+      {
+        "phone": "0987654321",
+        "tone": "professional",
+        "persona": "You are a professional assistant who provides clear, concise, and helpful responses in a business-like manner."
+      }
+    ]
+  }

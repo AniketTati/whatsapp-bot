@@ -44,30 +44,47 @@ def get_db_connection():
     return conn
 
 def save_message(phone, message, timestamp):
+    # Input validation to prevent issues
+    if not phone or not message:
+        return
+    
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO messages (phone, message, timestamp) VALUES (?, ?, ?)", 
-                   (phone, message, timestamp))
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute("INSERT INTO messages (phone, message, timestamp) VALUES (?, ?, ?)", 
+                       (str(phone), str(message), str(timestamp)))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error saving message: {e}", file=sys.stderr)
+    finally:
+        conn.close()
 
 def get_chat_history(phone, limit=3):
+    if not phone:
+        return []
+        
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Get only last few messages for faster context
-    cursor.execute("""
-        SELECT message FROM messages 
-        WHERE phone = ? 
-        ORDER BY timestamp DESC 
-        LIMIT ?
-    """, (phone, limit))
-    messages = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return list(reversed(messages))  # Return in chronological order
+    try:
+        # Get only last few messages for faster context
+        cursor.execute("""
+            SELECT message FROM messages 
+            WHERE phone = ? 
+            ORDER BY timestamp DESC 
+            LIMIT ?
+        """, (str(phone), limit))
+        messages = [row[0] for row in cursor.fetchall()]
+        return list(reversed(messages))  # Return in chronological order
+    except sqlite3.Error as e:
+        print(f"Database error retrieving history: {e}", file=sys.stderr)
+        return []
+    finally:
+        conn.close()
 
 # Initialize Ollama client
 OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
-MODEL_NAME = "neural-chat"  # Faster model
+# Use a more common model with fallback
+PREFERRED_MODELS = ["neural-chat", "mistral", "llama2", "codellama"]
 
 # Performance options for faster responses
 OLLAMA_OPTIONS = {
@@ -86,8 +103,39 @@ BLOCKED_WORDS = frozenset(["violence", "hate speech", "illegal", "scam", "threat
 def is_safe_response(response):
     return not any(bad_word in response.lower() for bad_word in BLOCKED_WORDS)
 
+def get_available_model():
+    """Check which model is available in Ollama"""
+    try:
+        # Try to get list of available models
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            models_data = response.json()
+            available_models = [model['name'].split(':')[0] for model in models_data.get('models', [])]
+            
+            # Return first available preferred model
+            for model in PREFERRED_MODELS:
+                if model in available_models:
+                    return model
+            
+            # If no preferred model, return first available
+            if available_models:
+                return available_models[0]
+                
+    except Exception as e:
+        print(f"Error checking available models: {e}", file=sys.stderr)
+    
+    # Default fallback
+    return "mistral"
+
 def get_ai_response(phone, message):
     try:
+        # Input validation
+        if not phone or not message:
+            return "I didn't understand that. Could you try again?"
+            
+        # Get available model
+        model_name = get_available_model()
+        
         # Get minimal context - only last 3 messages
         chat_history = get_chat_history(phone, limit=3)
         tone, persona = get_user_settings(phone)
@@ -123,7 +171,7 @@ Important guidelines:
         response = requests.post(
             OLLAMA_ENDPOINT, 
             json={
-                "model": MODEL_NAME,
+                "model": model_name,
                 "messages": messages,
                 "stream": False,
                 "options": OLLAMA_OPTIONS
@@ -152,6 +200,21 @@ Important guidelines:
     except Exception as e:
         print(f"Error calling Ollama: {e}", file=sys.stderr)
         return ""
+
+def sync_chat_history(phone, messages):
+    """Sync chat history from external source (e.g., WhatsApp Web API)"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    for msg in messages:
+        # Expected message format: {"content": "text", "timestamp": "ISO date", "sender": "user/bot"}
+        timestamp = msg.get('timestamp', datetime.datetime.now().isoformat())
+        content = msg.get('content', '')
+        
+        if content:  # Only save non-empty messages
+            save_message(phone, content, timestamp)
+    
+    conn.close()
 
 # Initialize database
 init_db()

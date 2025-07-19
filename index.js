@@ -42,12 +42,43 @@ async function callPythonBot(phoneNumber, message) {
     });
 }
 
+// Function to detect Chrome/Chromium executable path
+function getChromeExecutablePath() {
+    const os = require('os');
+    const platform = os.platform();
+    
+    if (platform === 'darwin') {
+        return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    } else if (platform === 'win32') {
+        return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    } else {
+        // Linux and other Unix-like systems
+        const possiblePaths = [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+            '/snap/bin/chromium'
+        ];
+        
+        const fs = require('fs');
+        for (const path of possiblePaths) {
+            if (fs.existsSync(path)) {
+                return path;
+            }
+        }
+        
+        // If no path found, let Puppeteer use its default
+        return undefined;
+    }
+}
+
 // Initialize WhatsApp Client with robust configuration
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: "whatsapp-bot" }),
     puppeteer: {
         headless: true,
-        executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        executablePath: getChromeExecutablePath(),
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -133,7 +164,7 @@ client.on('message', async msg => {
     }
 });
 
-// Periodic Messages with error handling
+// Periodic Messages with error handling (every 24 hours instead of 1 hour)
 async function startPeriodicMessages() {
     setInterval(async () => {
         try {
@@ -141,7 +172,8 @@ async function startPeriodicMessages() {
             for (const user of users) {
                 try {
                     const chatId = `${user.phone}@c.us`;
-                    await client.sendMessage(chatId, "Hello! Hope you're having a great day! 😊");
+                    // Send a more natural periodic message
+                    await client.sendMessage(chatId, "Hey! Just wanted to check in 😊 How's your day going?");
                 } catch (error) {
                     console.error(`Error sending periodic message to ${user.phone}:`, error);
                 }
@@ -149,7 +181,7 @@ async function startPeriodicMessages() {
         } catch (error) {
             console.error('Error in periodic messages:', error);
         }
-    }, 60 * 60 * 1000);
+    }, 24 * 60 * 60 * 1000); // 24 hours instead of 1 hour
 }
 
 // Error handling for uncaught exceptions
